@@ -1,0 +1,4 @@
+- Music: dreamy upbeat chiptune adventure loop, medium energy
+- SFX: sparkly crystal chime pickup; crunchy crash on hit
+- Flap/score whoosh procedural via WebAudio
+- Audio unlocks on first tap; mute button top-right
