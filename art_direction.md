@@ -1,0 +1,4 @@
+- Premium 16/32-bit pixel art, crisp pixels, cinematic and magical
+- Palette: twilight violet/teal skies, glowing cyan & magenta crystals, warm gold accents
+- Subjects: small winged sky-fox hero (4-frame flap), sky background, floating-island parallax layer, crystal-rock pillar, collectible crystal
+- Lighting: soft glows, rim light, atmospheric fog; consistent dark outlines
