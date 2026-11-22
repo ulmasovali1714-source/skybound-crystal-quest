@@ -1,1 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#090816" />
+  <title>SKYBOUND: CRYSTAL QUEST</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./rosebud-game-defaults.css" />
+  <link rel="stylesheet" href="./app.css" />
+  <script src="./rosebud-game-defaults.js" defer></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Configure these with your deployed HTTPS API and hosted TON Connect manifest.
+    // Keep secrets (especially the Telegram bot token) on the backend only.
+    window.SKYBOUND_CONFIG = window.SKYBOUND_CONFIG || {
+      apiBaseUrl: "",
+      tonConnectManifestUrl: "",
+      botUsername: ""
+    };
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "@tonconnect/ui": "https://esm.sh/@tonconnect/ui@2.3.0?bundle"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="loading-screen" class="loading-screen" role="status" aria-live="polite">
+    <div class="loading-stars" aria-hidden="true"></div>
+    <div class="loading-brand">
+      <div class="loading-crystal"><img src="assets/crystal-gem.webp" alt="" /></div>
+      <p class="eyebrow">A SKYBOUND ARCADE ADVENTURE</p>
+      <h1>SKYBOUND</h1>
+      <p class="loading-subtitle">CRYSTAL QUEST</p>
+    </div>
+    <div class="loading-meter-wrap">
+      <div class="loading-caption"><span>PREPARING YOUR EXPEDITION</span><strong id="loading-percent">0%</strong></div>
+      <div class="loading-track"><span id="loading-progress"></span></div>
+      <div class="loading-sparkle">✦ &nbsp; ✧ &nbsp; ✦</div>
+    </div>
+  </div>
 
+  <div id="app-shell" class="app-shell" hidden>
+    <header class="app-header">
+      <button class="brand-button" data-nav="home" aria-label="Go to Home">
+        <span class="brand-mark"><img src="assets/crystal-gem.webp" alt="" /></span>
+        <span class="brand-wordmark"><strong>SKYBOUND</strong><small>CRYSTAL QUEST</small></span>
+      </button>
+      <div class="header-actions">
+        <span class="online-pill"><i></i> SKY REALM</span>
+        <div class="ticket-chip" aria-label="Ticket balance"><span class="ticket-icon">✦</span><span id="header-tickets">—</span></div>
+      </div>
+    </header>
+
+    <main id="app-main" class="app-main">
+      <section id="page-home" class="page active" aria-label="Home">
+        <div class="page-content home-content">
+          <div class="home-greeting">
+            <div><p class="eyebrow">YOUR NEXT EXPEDITION</p><h1>Welcome, <span id="home-first-name">Sky Adventurer</span></h1></div>
+            <span class="realm-badge">✦ REALM 01</span>
+          </div>
+
+          <article class="hero-banner card-glow">
+            <div class="hero-banner-art" aria-hidden="true"><img src="assets/hero-fly.webp" alt="" /></div>
+            <div class="hero-banner-copy">
+              <span class="mini-label">THE SKIES ARE CALLING</span>
+              <h2>Find your<br /><em>crystal trail.</em></h2>
+              <p>Fly through the floating realms. Every crystal counts.</p>
+            </div>
+            <div class="banner-sparkle sparkle-one">✦</div><div class="banner-sparkle sparkle-two">✧</div>
+          </article>
+
+          <article class="ticket-panel card">
+            <div class="ticket-panel-top">
+              <div class="ticket-orb">✦</div>
+              <div class="ticket-details"><span class="mini-label">EXPEDITION TICKETS</span><strong id="home-tickets">—</strong><small>1 ticket · 1 flight</small></div>
+              <span id="ticket-status" class="status-tag">CONNECTING</span>
+            </div>
+            <button id="start-game" class="primary-button" type="button"><span>START GAME</span><span class="button-cost">✦ &nbsp;1 TICKET</span></button>
+            <p class="micro-copy">A ticket is charged only when the server accepts a new run.</p>
+          </article>
+
+          <div class="section-heading"><div><p class="eyebrow">YOUR JOURNEY</p><h2>Expedition stats</h2></div><span class="section-flourish">✦ ── ✦</span></div>
+          <div class="stats-grid">
+            <article class="stat-card"><span class="stat-icon purple">↗</span><span class="stat-label">BEST SCORE</span><strong id="home-best">—</strong><small>all-time best</small></article>
+            <article class="stat-card"><span class="stat-icon cyan">◇</span><span class="stat-label">CRYSTALS</span><strong id="home-crystals">—</strong><small>collected</small></article>
+            <article class="stat-card stat-wide"><span class="stat-icon gold">☄</span><span class="stat-label">FLIGHTS TAKEN</span><strong id="home-games">—</strong><small>your total expeditions</small></article>
+          </div>
+
+          <article class="daily-home-card card">
+            <div class="daily-emblem"><span>✦</span></div>
+            <div class="daily-home-copy"><span class="mini-label">A GIFT FROM THE REALM</span><h3>Daily ticket chest</h3><p id="daily-home-status">Claim free tickets every 24 hours.</p></div>
+            <button class="square-action" data-action="daily-claim" type="button" aria-label="Claim daily tickets">↗</button>
+          </article>
+
+          <article id="last-result-card" class="last-result-card card" hidden>
+            <div class="result-glyph">✧</div><div><span class="mini-label">LAST EXPEDITION</span><p id="last-result-text"></p></div>
+          </article>
+          <p id="home-account-note" class="footnote"></p>
+        </div>
+      </section>
+
+      <section id="page-earn" class="page" aria-label="Earn">
+        <div class="page-content">
+          <div class="page-heading"><p class="eyebrow">THE TREASURE HALL</p><h1>Earn tickets</h1><p>Complete verified missions to earn more flights.</p></div>
+          <article class="daily-feature card card-glow">
+            <div class="daily-feature-top"><div class="reward-icon">✦</div><span class="status-tag" id="daily-status">24 HOUR REWARD</span></div>
+            <span class="mini-label">DAILY REWARD</span><h2>Open the starlight chest</h2>
+            <p id="daily-description">A free ticket gift, once every 24 hours. Availability is confirmed securely.</p>
+            <div class="reward-row"><span>Ticket reward</span><strong id="daily-reward-amount">—</strong></div>
+            <button id="daily-claim-button" class="secondary-button" data-action="daily-claim" type="button">CLAIM DAILY TICKETS</button>
+          </article>
+
+          <article class="referral-card card">
+            <div class="card-heading-row"><div><span class="mini-label">GROW THE SKY GUILD</span><h2>Invite a friend</h2></div><span class="referral-icon">♧</span></div>
+            <p>Share your personal invite link. Rewards are granted only after the server verifies a new Telegram account.</p>
+            <div class="referral-link-box"><span id="referral-link">Your verified invite link appears here</span><button id="copy-referral" type="button" aria-label="Copy referral link">▣</button></div>
+            <div class="button-row"><button id="share-referral" class="secondary-button" type="button">INVITE FRIENDS</button><button id="verify-referral" class="outline-button" type="button">CHECK REWARDS</button></div>
+            <p class="micro-copy">Self-referrals, duplicate accounts and unverified invites do not qualify.</p>
+          </article>
+
+          <div class="section-heading task-heading"><div><p class="eyebrow">MORE WAYS TO EARN</p><h2>Guild missions</h2></div><span class="section-flourish">✧ ── ✦</span></div>
+          <div id="task-list" class="task-list"></div>
+          <div id="earn-empty" class="empty-state card"><span>✧</span><h3>Awaiting verified missions</h3><p>Connect to the secure Skybound service to load channel checks and limited-time tasks.</p></div>
+          <p class="security-note">Every reward is verified and recorded by the Skybound server. This screen never grants tickets by itself.</p>
+        </div>
+      </section>
+
+      <section id="page-profile" class="page" aria-label="Profile">
+        <div class="page-content">
+          <div class="page-heading"><p class="eyebrow">YOUR SKYBOUND ID</p><h1>Profile</h1><p>Your Telegram identity and expedition record.</p></div>
+          <article class="profile-card card card-glow">
+            <div class="profile-avatar-wrap"><img id="profile-avatar" src="assets/crystal-gem.webp" alt="Profile avatar" /><span class="avatar-status"></span></div>
+            <div class="profile-identity"><span class="mini-label">SKY REALM EXPLORER</span><h2 id="profile-name">Open in Telegram</h2><p id="profile-username">Telegram account not detected</p></div>
+            <span id="telegram-auth-status" class="auth-badge">UNVERIFIED</span>
+          </article>
+          <div class="profile-stats stats-grid">
+            <article class="stat-card"><span class="stat-icon purple">↗</span><span class="stat-label">BEST SCORE</span><strong id="profile-best">—</strong></article>
+            <article class="stat-card"><span class="stat-icon cyan">◇</span><span class="stat-label">TOTAL CRYSTALS</span><strong id="profile-crystals">—</strong></article>
+            <article class="stat-card"><span class="stat-icon gold">✦</span><span class="stat-label">TICKETS</span><strong id="profile-tickets">—</strong></article>
+            <article class="stat-card"><span class="stat-icon pink">☄</span><span class="stat-label">GAMES PLAYED</span><strong id="profile-games">—</strong></article>
+          </div>
+          <article class="wallet-card card">
+            <div class="wallet-heading"><div class="wallet-symbol">TON</div><div><span class="mini-label">WEB3 CONNECTION</span><h2>TON wallet</h2></div><span id="wallet-status" class="status-tag">NOT CONNECTED</span></div>
+            <p id="wallet-address" class="wallet-address">Connect a wallet to see its public address. Skybound will never ask for secret keys.</p>
+            <button id="wallet-button" class="outline-button wallet-button" type="button">CONNECT TON WALLET</button>
+            <p class="micro-copy">Connection uses TON Connect. Never share a recovery phrase or private key.</p>
+          </article>
+          <div class="section-heading"><div><p class="eyebrow">MILESTONES</p><h2>Achievements</h2></div></div>
+          <div id="achievement-list" class="achievement-list"></div>
+          <div id="achievement-empty" class="empty-state card"><span>✦</span><p>Verified achievements will appear here after your first expedition.</p></div>
+          <p id="profile-account-note" class="footnote"></p>
+        </div>
+      </section>
+
+      <section id="page-score" class="page" aria-label="Score leaderboard">
+        <div class="page-content">
+          <div class="page-heading"><p class="eyebrow">THE SKY GUILD</p><h1>Leaderboard</h1><p>Top 100 verified pilots. Rankings come from the Skybound server.</p></div>
+          <div class="leader-tabs" role="tablist" aria-label="Leaderboard period">
+            <button class="leader-tab active" data-period="daily" role="tab" aria-selected="true">DAILY</button>
+            <button class="leader-tab" data-period="weekly" role="tab" aria-selected="false">WEEKLY</button>
+            <button class="leader-tab" data-period="all-time" role="tab" aria-selected="false">ALL-TIME</button>
+          </div>
+          <div class="leaderboard-summary card"><div class="trophy">♛</div><div><span class="mini-label">YOUR GUILD RANK</span><strong id="my-rank">—</strong></div><span id="leaderboard-period-label" class="period-label">DAILY</span></div>
+          <div class="leaderboard-head"><span>RANK / PILOT</span><span>BEST SCORE</span></div>
+          <div id="leaderboard-list" class="leaderboard-list"></div>
+          <div id="leaderboard-empty" class="empty-state card"><span>✧</span><h3>Rankings not connected</h3><p>The leaderboard will show real verified pilots as soon as the authenticated backend is configured.</p><button id="refresh-leaderboard" class="outline-button" type="button">REFRESH RANKINGS</button></div>
+          <p class="security-note">No demo players or invented scores are displayed.</p>
+        </div>
+      </section>
+
+      <section id="page-game" class="page game-page" aria-label="Skybound game">
+        <div class="game-topbar"><button id="exit-game" class="game-exit" type="button" aria-label="Exit current run">‹</button><div><span class="mini-label">EXPEDITION IN PROGRESS</span><strong>FLAP TO FLY · COLLECT CRYSTALS</strong></div><span class="game-ticket-chip">✦ 1</span></div>
+        <div id="game-container" class="game-container"></div>
+        <div class="game-instructions">TAP TO FLAP <span>·</span> EACH CRYSTAL = 1</div>
+      </section>
+    </main>
+
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Main navigation">
+      <button class="nav-item active" data-nav="home" type="button"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span><span>HOME</span></button>
+      <button class="nav-item" data-nav="earn" type="button"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M17 5.5c-1.1-1.4-2.7-2-5-2-3 0-5 1.4-5 3.6 0 5.6 10 2 10 7.6 0 2.1-2 3.8-5 3.8-2.1 0-4-.8-5.2-2.2"/></svg></span><span>EARN</span></button>
+      <button class="nav-item" data-nav="profile" type="button"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><span>PROFILE</span></button>
+      <button class="nav-item" data-nav="score" type="button"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8m-4-4v4m-7-18h14v6a7 7 0 0 1-14 0zm0 2H3v3a5 5 0 0 0 5 5m11-8h2v3a5 5 0 0 1-5 5"/></svg></span><span>SCORE</span></button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="dialog-layer" class="dialog-layer" hidden></div>
+  <script type="module" src="./main.js"></script>
+  <script type="module" src="./app-shell.js"></script>
+  <script src="https://storage.googleapis.com/rosebud_staticfiles/ChatManager.js"></script>
+  <script src="https://storage.googleapis.com/rosebud_staticfiles/ProgressLogger.js"></script>
+  <script src="https://storage.googleapis.com/rosebud_staticfiles/OGP.js"></script>
+</body>
+      </html>
