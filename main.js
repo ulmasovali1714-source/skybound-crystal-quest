@@ -433,7 +433,7 @@ function die() {
       crystals: S.crystals,
 
       // Duration is measured in completed fixed steps.
-      elapsedMs: S.simTick * FIXED_STEP_MS,
+      elapsedMs: Math.round(S.simTick * FIXED_STEP_MS),
 
       seed: S.seed,
       randomAlgorithm: 'mulberry32-v1',
