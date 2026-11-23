@@ -406,7 +406,7 @@ function flap() {
   // Record input on the fixed simulation timeline,
   // not on the phone's wall clock.
   if (S.inputEvents.length < 12000) {
-    S.inputEvents.push(S.simTick * FIXED_STEP_MS);
+    S.inputEvents.push(Math.round(S.simTick * FIXED_STEP_MS));
   }
 
   S.hero.vy = -330;
