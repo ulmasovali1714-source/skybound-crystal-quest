@@ -1,4 +1,3 @@
-
 import { randomBytes, randomUUID } from 'node:crypto';
 import { HttpError, keyedDigest } from './http-utils.mjs';
 import { isTelegramMember, parseReferralStartParam, validateClientReport } from './validation.mjs';
@@ -263,8 +262,7 @@ export function createServices({ pool, config, verifyRunReport }) {
       const snapshot = await accountSnapshot(client, telegram.telegramId, config);
       return { ...snapshot, message: count ? `Verified ${count} referral reward(s).` : 'No eligible verified referrals are ready to claim.' };
     });
-  }
-
+                                      }
   async function claimTask(telegram, taskId, idempotencyKey) {
     const taskResult = await pool.query(`
       SELECT * FROM skybound_tasks WHERE task_id = $1 AND enabled = true
@@ -350,4 +348,139 @@ export function createServices({ pool, config, verifyRunReport }) {
       await withTransaction(pool, async (client) => {
         await client.query(`
           UPDATE skybound_game_runs SET status = 'rejected', finish_idempotency_key = $3, finished_at = now()
-          WHERE run_id = $1 AND telegram_id = $2 AND status = 'active'`, [runI
+          WHERE run_id = $1 AND telegram_id = $2 AND status = 'active'`, [runId, telegram.telegramId, runId]);
+      });
+      throw error;
+    }
+    let verified = null;
+    try {
+      const verification = await verifyRunReport({
+        run: { runId: run.run_id, telegramId: String(run.telegram_id), seed: Number(run.seed), startedAt: run.started_at },
+        clientReport: report,
+      });
+      verified = validateVerifierResult(verification, report);
+    } catch {
+      // A verifier error is a rejection, never a client-side fallback or reward.
+      verified = null;
+    }
+
+    return withTransaction(pool, async (client) => {
+      const locked = await client.query(`
+        SELECT run_id, status, verified_score, verified_crystals FROM skybound_game_runs
+        WHERE run_id = $1 AND telegram_id = $2 FOR UPDATE`, [runId, telegram.telegramId]);
+      if (!locked.rowCount) throw new HttpError(404, 'RUN_NOT_FOUND', 'Game run not found.');
+      if (locked.rows[0].status !== 'active') {
+        const snapshot = await accountSnapshot(client, telegram.telegramId, config);
+        return {
+          ...snapshot,
+          verified: locked.rows[0].status === 'verified',
+          score: Number(locked.rows[0].verified_score || 0),
+          awardedCrystals: Number(locked.rows[0].verified_crystals || 0),
+        };
+      }
+      if (!verified) {
+        await client.query(`
+          UPDATE skybound_game_runs SET status = 'rejected', client_score = $2, client_crystals = $3,
+            finish_idempotency_key = $4, finished_at = now() WHERE run_id = $1`,
+        [runId, report.score, report.crystals, runId]);
+        return {
+          ...(await accountSnapshot(client, telegram.telegramId, config)),
+          verified: false,
+          score: 0,
+          awardedCrystals: 0,
+          message: 'Run received, but server verification did not approve it. No score or crystals were credited.',
+        };
+      }
+
+      await client.query(`
+        UPDATE skybound_game_runs SET status = 'verified', client_score = $2, client_crystals = $3,
+          verified_score = $4, verified_crystals = $5, finish_idempotency_key = $6, finished_at = now()
+        WHERE run_id = $1`, [runId, report.score, report.crystals, verified.score, verified.crystals, runId]);
+      await client.query(`INSERT INTO skybound_verified_scores (run_id, telegram_id, score, crystals) VALUES ($1, $2, $3, $4)`,
+        [runId, telegram.telegramId, verified.score, verified.crystals]);
+      await client.query(`
+        UPDATE skybound_users SET best_score = GREATEST(best_score, $2),
+          total_crystals = total_crystals + $3, games_played = games_played + 1, updated_at = now()
+        WHERE telegram_id = $1`, [telegram.telegramId, verified.score, verified.crystals]);
+      if (verified.crystals > 0) {
+        await client.query(`
+          INSERT INTO skybound_crystal_transactions (telegram_id, delta, reason, idempotency_key, reference_id)
+          VALUES ($1, $2, 'verified_game', $3, $4)`, [telegram.telegramId, verified.crystals, `run-crystals:${runId}`, runId]);
+      }
+      return {
+        ...(await accountSnapshot(client, telegram.telegramId, config)),
+        verified: true,
+        score: verified.score,
+        awardedCrystals: verified.crystals,
+        message: 'Run replay verified and results credited.',
+      };
+    });
+  }
+
+  async function leaderboard(telegramId, period, requestedLimit) {
+    const limit = Math.min(100, Math.max(1, Number(requestedLimit) || 100));
+    const timeCondition = period === 'daily'
+      ? "WHERE s.verified_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+      : period === 'weekly'
+        ? "WHERE s.verified_at >= date_trunc('week', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        : '';
+    const sql = `
+      WITH score_by_player AS (
+        SELECT s.telegram_id, MAX(s.score)::INTEGER AS best_score, MAX(s.verified_at) AS last_verified_at
+        FROM skybound_verified_scores s ${timeCondition}
+        GROUP BY s.telegram_id
+      ), ranked AS (
+        SELECT p.telegram_id, p.best_score, p.last_verified_at,
+          row_number() OVER (ORDER BY p.best_score DESC, p.last_verified_at ASC, p.telegram_id ASC)::INTEGER AS rank
+        FROM score_by_player p
+      )
+      SELECT r.rank, r.telegram_id, r.best_score, r.rank = (SELECT rank FROM ranked WHERE telegram_id = $1) AS is_current_player,
+        u.first_name, u.username, u.photo_url
+      FROM ranked r JOIN skybound_users u ON u.telegram_id = r.telegram_id
+      ORDER BY r.rank LIMIT $2`;
+    const result = await pool.query(sql, [telegramId, limit]);
+    const rankResult = await pool.query(`
+      WITH score_by_player AS (
+        SELECT s.telegram_id, MAX(s.score)::INTEGER AS best_score, MAX(s.verified_at) AS last_verified_at
+        FROM skybound_verified_scores s ${timeCondition}
+        GROUP BY s.telegram_id
+      ), ranked AS (
+        SELECT telegram_id, row_number() OVER (ORDER BY best_score DESC, last_verified_at ASC, telegram_id ASC)::INTEGER AS rank
+        FROM score_by_player
+      ) SELECT rank FROM ranked WHERE telegram_id = $1`, [telegramId]);
+    return {
+      entries: result.rows.map((row) => ({
+        rank: Number(row.rank),
+        displayName: row.first_name || row.username || 'Sky Pilot',
+        username: row.username || null,
+        photoUrl: row.photo_url || null,
+        bestScore: Number(row.best_score),
+        isCurrentPlayer: String(row.telegram_id) === telegramId,
+      })),
+      currentPlayerRank: rankResult.rowCount ? Number(rankResult.rows[0].rank) : null,
+    };
+  }
+
+  async function rateLimit(scope, key, limit) {
+    const keyHash = keyedDigest(config.telegramBotToken, key);
+    const result = await pool.query(`
+      INSERT INTO skybound_rate_buckets (scope, key_hash, window_start, hits)
+      VALUES ($1, $2, date_trunc('minute', now()), 1)
+      ON CONFLICT (scope, key_hash) DO UPDATE SET
+        hits = CASE WHEN skybound_rate_buckets.window_start < date_trunc('minute', now()) THEN 1 ELSE skybound_rate_buckets.hits + 1 END,
+        window_start = date_trunc('minute', now())
+      RETURNING hits`, [scope, keyHash]);
+    if (Number(result.rows[0].hits) > limit) throw new HttpError(429, 'RATE_LIMITED', 'Too many requests. Please wait and retry.');
+  }
+
+  async function applyRateLimits(request, telegramId) {
+    const forwarded = config.trustProxy && typeof request.headers['x-forwarded-for'] === 'string'
+      ? request.headers['x-forwarded-for'].split(',')[0].trim()
+      : '';
+    const ip = (forwarded && forwarded.length <= 128 ? forwarded : request.socket?.remoteAddress) || 'unknown';
+    await rateLimit('ip', ip, config.ipRateLimitPerMinute);
+    await rateLimit('telegram', telegramId, config.apiRateLimitPerMinute);
+  }
+
+  return Object.freeze({ me, startGame, claimDaily, claimReferrals, claimTask, abandonGame, finishGame, leaderboard, applyRateLimits });
+                           }
