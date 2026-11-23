@@ -1,3 +1,4 @@
+
 // SKYBOUND Mini App shell: the browser is presentation-only for balances/rewards.
 const tg = window.Telegram?.WebApp ?? null;
 const config = window.SKYBOUND_CONFIG ?? {};
@@ -27,6 +28,7 @@ const state = {
   apiLoaded: false,
   apiError: '',
   activeRunId: null,
+  pendingFinish: null,
   startLocked: false,
   finishLocked: false,
   abandonLocked: false,
@@ -297,7 +299,8 @@ function renderTasks() {
   empty.hidden = list.childElementCount > 0;
 }
 
-function renderAchievements() {  const list = $('achievement-list');
+function renderAchievements() {
+  const list = $('achievement-list');
   const empty = $('achievement-empty');
   if (!list || !empty) return;
   list.replaceChildren();
@@ -373,24 +376,40 @@ function render() {
   renderAchievements();
   renderWallet();
 }
-
+  
 function showConfirm(title, message, confirmLabel, onConfirm) {
   const layer = $('dialog-layer');
   const card = document.createElement('div');
   card.className = 'dialog-card';
-  const heading = document.createElement('h2'); heading.textContent = title;
-  const copy = document.createElement('p'); copy.textContent = message;
-  const actions = document.createElement('div'); actions.className = 'dialog-actions';
-  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'CANCEL';
-  const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'confirm'; confirm.textContent = confirmLabel;
-  const close = () => { layer.hidden = true; layer.replaceChildren(); };
+  const heading = document.createElement('h2');
+  heading.textContent = title;
+  const copy = document.createElement('p');
+  copy.textContent = message;
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'CANCEL';
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'confirm';
+  confirm.textContent = confirmLabel;
+  const close = () => {
+    layer.hidden = true;
+    layer.replaceChildren();
+  };
   cancel.addEventListener('click', close);
-  confirm.addEventListener('click', async () => { close(); await onConfirm(); });
+  confirm.addEventListener('click', async () => {
+    close();
+    await onConfirm();
+  });
   actions.append(cancel, confirm);
   card.append(heading, copy, actions);
   layer.replaceChildren(card);
   layer.hidden = false;
-  layer.addEventListener('click', (event) => { if (event.target === layer) close(); }, { once: true });
+  layer.addEventListener('click', (event) => {
+    if (event.target === layer) close();
+  }, { once: true });
 }
 
 function updateAuthoritativeBalances(data) {
@@ -400,6 +419,10 @@ function updateAuthoritativeBalances(data) {
 
 async function startGame() {
   if (state.startLocked || state.finishLocked || state.abandonLocked) return;
+  if (state.pendingFinish) {
+    showToast('Your previous run is still awaiting server confirmation. Reconnect and retry first.');
+    return;
+  }
   if (!state.initData) {
     showToast('Open this Mini App inside Telegram to authenticate your account.');
     return;
@@ -448,7 +471,9 @@ async function startGame() {
     state.lastResult = null;
     showPage('game');
     render();
-    window.dispatchEvent(new CustomEvent('skybound:launch', { detail: { runId: data.runId, seed: data.seed ?? null } }));
+    window.dispatchEvent(new CustomEvent('skybound:launch', {
+      detail: { runId: data.runId, seed: data.seed }
+    }));
   } catch (error) {
     if (error.code === 'NOT_ENOUGH_TICKETS' || error.body?.code === 'NOT_ENOUGH_TICKETS') {
       if (integer(error.body?.ticketBalance) !== null) state.tickets = error.body.ticketBalance;
@@ -478,7 +503,9 @@ async function claimDaily() {
   if (!state.pendingDailyKey) state.pendingDailyKey = randomKey();
   try {
     const result = await apiRequest('/v1/rewards/daily/claim', {
-      method: 'POST', body: { idempotencyKey: state.pendingDailyKey }, idempotencyKey: state.pendingDailyKey,
+      method: 'POST',
+      body: { idempotencyKey: state.pendingDailyKey },
+      idempotencyKey: state.pendingDailyKey,
     });
     state.pendingDailyKey = '';
     updateAuthoritativeBalances(result);
@@ -493,12 +520,17 @@ async function claimDaily() {
 }
 
 async function verifyReferrals() {
-  if (!hasSecureSession()) { showToast('Secure referral verification is not connected.'); return; }
+  if (!hasSecureSession()) {
+    showToast('Secure referral verification is not connected.');
+    return;
+  }
   if (!state.pendingReferralKey) state.pendingReferralKey = randomKey();
   $('verify-referral').disabled = true;
   try {
     const result = await apiRequest('/v1/referrals/claim', {
-      method: 'POST', body: { idempotencyKey: state.pendingReferralKey }, idempotencyKey: state.pendingReferralKey,
+      method: 'POST',
+      body: { idempotencyKey: state.pendingReferralKey },
+      idempotencyKey: state.pendingReferralKey,
     });
     state.pendingReferralKey = '';
     updateAuthoritativeBalances(result);
@@ -506,18 +538,28 @@ async function verifyReferrals() {
     await refreshBootstrap({ silent: true });
   } catch (error) {
     showToast(error.message || 'Referral rewards could not be verified.');
-  } finally { $('verify-referral').disabled = false; }
+  } finally {
+    $('verify-referral').disabled = false;
+  }
 }
 
 async function claimTask(taskId, button) {
-  if (!hasSecureSession()) { showToast('Secure mission verification is not connected.'); return; }
+  if (!hasSecureSession()) {
+    showToast('Secure mission verification is not connected.');
+    return;
+  }
   const id = String(taskId);
   let key = state.pendingTaskKeys.get(id);
-  if (!key) { key = randomKey(); state.pendingTaskKeys.set(id, key); }
+  if (!key) {
+    key = randomKey();
+    state.pendingTaskKeys.set(id, key);
+  }
   button.disabled = true;
   try {
     const result = await apiRequest(`/v1/tasks/${encodeURIComponent(id)}/claim`, {
-      method: 'POST', body: { idempotencyKey: key }, idempotencyKey: key,
+      method: 'POST',
+      body: { idempotencyKey: key },
+      idempotencyKey: key,
     });
     state.pendingTaskKeys.delete(id);
     updateAuthoritativeBalances(result);
@@ -538,15 +580,25 @@ async function shareReferral() {
   if (tg?.openTelegramLink && telegramVersionAtLeast('6.1')) {
     tg.openTelegramLink(shareUrl);
   } else if (navigator.share) {
-    try { await navigator.share({ title: 'Skybound: Crystal Quest', text: 'Join me in Skybound!', url: state.referralLink }); }
-    catch (error) { if (error.name !== 'AbortError') showToast('Invite sharing was cancelled.'); }
+    try {
+      await navigator.share({
+        title: 'Skybound: Crystal Quest',
+        text: 'Join me in Skybound!',
+        url: state.referralLink
+      });
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('Invite sharing was cancelled.');
+    }
   } else {
     await copyReferral();
   }
 }
 
 async function copyReferral() {
-  if (!state.referralLink) { showToast('Your verified invite link is not available yet.'); return; }
+  if (!state.referralLink) {
+    showToast('Your verified invite link is not available yet.');
+    return;
+  }
   try {
     await navigator.clipboard.writeText(state.referralLink);
     showToast('Personal invite link copied.');
@@ -558,6 +610,7 @@ async function copyReferral() {
 function renderLeaderboardRows() {
   const list = $('leaderboard-list');
   const empty = $('leaderboard-empty');
+  if (!list || !empty) return;
   list.replaceChildren();
   for (const row of state.leaderboard.slice(0, 100)) {
     const item = document.createElement('article');
@@ -569,13 +622,18 @@ function renderLeaderboardRows() {
     image.className = 'leader-avatar';
     image.alt = '';
     image.src = safeHttpsUrl(row.photoUrl) || 'assets/crystal-gem.webp';
-    image.onerror = () => { image.onerror = null; image.src = 'assets/crystal-gem.webp'; };
+    image.onerror = () => {
+      image.onerror = null;
+      image.src = 'assets/crystal-gem.webp';
+    };
     const identity = document.createElement('div');
     identity.className = 'leader-identity';
     const name = document.createElement('strong');
     name.textContent = String(row.displayName || row.username || 'Sky Pilot');
     const username = document.createElement('small');
-    username.textContent = row.isCurrentPlayer ? 'YOU · VERIFIED PILOT' : (row.username ? `@${String(row.username).replace(/^@/, '')}` : 'Verified pilot');
+    username.textContent = row.isCurrentPlayer
+      ? 'YOU · VERIFIED PILOT'
+      : (row.username ? `@${String(row.username).replace(/^@/, '')}` : 'Verified pilot');
     identity.append(name, username);
     const score = document.createElement('span');
     score.className = 'leader-score';
@@ -627,28 +685,24 @@ async function loadLeaderboard(period = state.period) {
     empty.querySelector('h3').textContent = 'Rankings unavailable';
     empty.querySelector('p').textContent = error.message || 'The authenticated leaderboard could not be loaded.';
   }
-                  }function showLeaderboardLoading() {
+}
+
+function showLeaderboardLoading() {
   const empty = $('leaderboard-empty');
   if (!empty) return;
   const title = empty.querySelector('h3');
   const copy = empty.querySelector('p');
   if (title) title.textContent = 'Rankings not connected';
   if (copy) copy.textContent = 'The leaderboard will show real verified pilots as soon as the authenticated backend is configured.';
-}
-
+                           }
+    
 function onGameOver(event) {
   const report = event.detail || {};
   const runId = String(report.runId || '');
-  if (!state.activeRunId || runId !== state.activeRunId) return;
-  const currentRunId = state.activeRunId;
-  state.activeRunId = null;
-  state.finishLocked = true;
+  if (!state.activeRunId || runId !== state.activeRunId || state.pendingFinish) return;
+
   const score = integer(report.score) ?? 0;
   const collected = integer(report.crystals) ?? 0;
-  state.lastResult = { text: `Score ${score.toLocaleString()} · ${collected.toLocaleString()} crystals collected · verifying with server…` };
-  showPage('home');
-  render();
-  window.dispatchEvent(new Event('skybound:stop'));
   const clientReport = {
     score,
     crystals: collected,
@@ -657,10 +711,24 @@ function onGameOver(event) {
     randomAlgorithm: String(report.randomAlgorithm || ''),
     inputEvents: Array.isArray(report.inputEvents) ? report.inputEvents.slice(0, 12000) : [],
   };
-  void finishRun(currentRunId, clientReport);
+
+  // Preserve the run and report until the server confirms receipt.
+  state.pendingFinish = { runId, clientReport };
+  state.finishLocked = true;
+  state.lastResult = {
+    text: `Score ${score.toLocaleString()} · ${collected.toLocaleString()} crystals collected · verifying with server…`
+  };
+
+  showPage('home');
+  render();
+  window.dispatchEvent(new Event('skybound:stop'));
+  void finishRun(runId, clientReport);
 }
 
 async function finishRun(runId, clientReport) {
+  if (state.finishLocked && state.pendingFinish?.runId !== runId) return;
+  state.finishLocked = true;
+
   try {
     const result = await apiRequest('/v1/game/finish', {
       method: 'POST',
@@ -668,48 +736,79 @@ async function finishRun(runId, clientReport) {
       idempotencyKey: runId,
       timeoutMs: 20000,
     });
+
     if (result.user) state.profile = result.user;
     if (integer(result.ticketBalance) !== null) state.tickets = result.ticketBalance;
+
     if (result.verified === true) {
       const awarded = integer(result.awardedCrystals);
-      state.lastResult = { text: `Verified score ${formatStat(result.score ?? clientReport.score)} · ${awarded === null ? 'crystal award confirmed' : `+${awarded} crystals credited`}.` };
+      state.lastResult = {
+        text: `Verified score ${formatStat(result.score ?? clientReport.score)} · ${awarded === null ? 'crystal award confirmed' : `+${awarded} crystals credited`}.`
+      };
     } else {
-      state.lastResult = { text: 'Run received. The server has not confirmed a score or crystal credit yet.' };
+      state.lastResult = {
+        text: 'Run received. The server has not confirmed a score or crystal credit yet.'
+      };
     }
+
+    // A successful response means the server has handled this run.
+    if (state.pendingFinish?.runId === runId) state.pendingFinish = null;
+    if (state.activeRunId === runId) state.activeRunId = null;
+
     render();
     await refreshBootstrap({ silent: true });
   } catch (error) {
-    state.lastResult = { text: `Run report not confirmed (${clientReport.score.toLocaleString()} score, ${clientReport.crystals.toLocaleString()} crystals collected). No unverified reward was added.` };
+    state.lastResult = {
+      text: `Run report not confirmed (${clientReport.score.toLocaleString()} score, ${clientReport.crystals.toLocaleString()} crystals collected). The report is saved on this screen for retry. No unverified reward was added.`
+    };
     render();
-    showToast(error.message || 'The run could not be verified.');
+    showToast(error.message || 'The run could not be verified. Reconnect to retry.');
   } finally {
     state.finishLocked = false;
     render();
   }
 }
 
+async function retryPendingFinish() {
+  if (!state.pendingFinish || state.finishLocked || !hasSecureSession()) return;
+  const pending = state.pendingFinish;
+  await finishRun(pending.runId, pending.clientReport);
+}
+
 async function exitRun() {
   if (!state.activeRunId || state.abandonLocked) return;
-  showConfirm('Leave this expedition?', 'Your ticket has already been reserved. Leaving will end the run and does not refund that ticket.', 'EXIT RUN', async () => {
-    state.abandonLocked = true;
-    const runId = state.activeRunId;
-    try {
-      await apiRequest('/v1/game/abandon', { method: 'POST', body: { runId }, idempotencyKey: runId });
-      state.lastResult = { text: 'Expedition ended early. The reserved ticket was not refunded.' };
-      state.activeRunId = null;
-      window.dispatchEvent(new Event('skybound:stop'));
-      showPage('home');
-      render();
-      await refreshBootstrap({ silent: true });
-    } catch (error) {
-      state.activeRunId = null;
-      window.dispatchEvent(new Event('skybound:stop'));
-      showPage('home');
-      state.lastResult = { text: 'The run was closed on this device, but the server did not confirm the close. Ticket and score state remain server-controlled.' };
-      render();
-      showToast(error.message || 'Server could not confirm run closure.');
-    } finally { state.abandonLocked = false; }
-  });
+
+  showConfirm(
+    'Leave this expedition?',
+    'Your ticket has already been reserved. Leaving will end the run and does not refund that ticket.',
+    'EXIT RUN',
+    async () => {
+      state.abandonLocked = true;
+      const runId = state.activeRunId;
+
+      try {
+        await apiRequest('/v1/game/abandon', {
+          method: 'POST',
+          body: { runId },
+          idempotencyKey: runId,
+        });
+
+        state.lastResult = {
+          text: 'Expedition ended early. The reserved ticket was not refunded.'
+        };
+        state.activeRunId = null;
+        window.dispatchEvent(new Event('skybound:stop'));
+        showPage('home');
+        render();
+        await refreshBootstrap({ silent: true });
+      } catch (error) {
+        // Keep activeRunId so the app does not forget an unconfirmed server run.
+        showToast(error.message || 'Server could not confirm run closure. Your expedition remains active.');
+      } finally {
+        state.abandonLocked = false;
+      }
+    }
+  );
 }
 
 function setupBackButton() {
@@ -723,6 +822,7 @@ function setupBackButton() {
 async function setupTonConnect() {
   const manifestUrl = safeHttpsUrl(String(config.tonConnectManifestUrl || ''));
   const button = $('wallet-button');
+
   button?.addEventListener('click', async () => {
     if (!state.tonUI) {
       showToast(state.tonError || 'TON Connect is not configured.');
@@ -731,17 +831,23 @@ async function setupTonConnect() {
     try {
       if (state.tonWallet) await state.tonUI.disconnect();
       else await state.tonUI.openModal();
-    } catch (error) { showToast(error.message || 'Wallet connection was not completed.'); }
+    } catch (error) {
+      showToast(error.message || 'Wallet connection was not completed.');
+    }
   });
+
   if (!manifestUrl) {
     state.tonError = 'Configure a public HTTPS TON Connect manifest before connecting wallets.';
     renderWallet();
     return;
   }
+
   try {
     const tonModule = await import('@tonconnect/ui');
     const TonConnectUI = Reflect.get(tonModule, 'TonConnectUI');
-    if (typeof TonConnectUI !== 'function') throw new Error('TON Connect UI constructor was not exported by the module.');
+    if (typeof TonConnectUI !== 'function') {
+      throw new Error('TON Connect UI constructor was not exported by the module.');
+    }
     state.tonUI = new TonConnectUI({ manifestUrl });
     state.tonUI.onStatusChange((wallet) => {
       state.tonWallet = wallet || null;
@@ -760,53 +866,87 @@ function renderWallet() {
   const address = wallet?.account?.address || '';
   const status = $('wallet-status');
   const button = $('wallet-button');
+
   if (status) {
     status.textContent = address ? 'CONNECTED · LOCAL' : (state.tonError ? 'SETUP REQUIRED' : 'NOT CONNECTED');
     status.dataset.state = address ? 'ready' : '';
   }
-  setText('wallet-address', address
-    ? `${address.slice(0, 12)}…${address.slice(-10)} · locally connected. Verify TON proof on the backend before treating it as an account credential.`
-    : 'Connect a wallet to see its public address. Skybound will never ask for secret keys.');
+
+  setText(
+    'wallet-address',
+    address
+      ? `${address.slice(0, 12)}…${address.slice(-10)} · locally connected. Verify TON proof on the backend before treating it as an account credential.`
+      : 'Connect a wallet to see its public address. Skybound will never ask for secret keys.'
+  );
+
   if (button) button.textContent = address ? 'DISCONNECT WALLET' : 'CONNECT TON WALLET';
 }
 
 function wireEvents() {
   document.addEventListener('click', (event) => {
     const nav = event.target.closest('[data-nav]');
-    if (nav) { navigate(nav.dataset.nav); return; }
+    if (nav) {
+      navigate(nav.dataset.nav);
+      return;
+    }
+
     const action = event.target.closest('[data-action]');
-    if (action?.dataset.action === 'daily-claim') { void claimDaily(); return; }
-    if (action?.dataset.action === 'task-claim') { void claimTask(action.dataset.taskId, action); return; }
+    if (action?.dataset.action === 'daily-claim') {
+      void claimDaily();
+      return;
+    }
+    if (action?.dataset.action === 'task-claim') {
+      void claimTask(action.dataset.taskId, action);
+      return;
+    }
+
     const period = event.target.closest('[data-period]');
-    if (period) { void loadLeaderboard(period.dataset.period); return; }
+    if (period) void loadLeaderboard(period.dataset.period);
   });
+
   $('start-game').addEventListener('click', () => void startGame());
   $('copy-referral').addEventListener('click', () => void copyReferral());
   $('share-referral').addEventListener('click', () => void shareReferral());
   $('verify-referral').addEventListener('click', () => void verifyReferrals());
   $('refresh-leaderboard').addEventListener('click', () => void loadLeaderboard(state.period));
   $('exit-game').addEventListener('click', () => exitRun());
+
   window.addEventListener('skybound:gameover', onGameOver);
-  window.addEventListener('online', () => { if (hasSecureSession()) void refreshBootstrap({ silent: true }); });
+
+  window.addEventListener('online', () => {
+    if (state.pendingFinish) {
+      void retryPendingFinish();
+    } else if (hasSecureSession()) {
+      void refreshBootstrap({ silent: true });
+    }
+  });
 }
 
 async function loadScreenAssets() {
   const assets = [
-    'assets/hero-fly.webp', 'assets/sky-bg.webp', 'assets/islands-layer.webp',
-    'assets/crystal-pillar.webp', 'assets/crystal-gem.webp',
-    'assets/hanging-crystal-saw.webp', 'assets/giant-crystal-blade.webp',
+    'assets/hero-fly.webp',
+    'assets/sky-bg.webp',
+    'assets/islands-layer.webp',
+    'assets/crystal-pillar.webp',
+    'assets/crystal-gem.webp',
+    'assets/hanging-crystal-saw.webp',
+    'assets/giant-crystal-blade.webp',
   ];
+
   let completed = 0;
   const bar = $('loading-progress');
   const percent = $('loading-percent');
+
   const updateProgress = (value) => {
     const safe = Math.max(0, Math.min(100, Math.round(value)));
     bar.style.width = `${safe}%`;
     percent.textContent = `${safe}%`;
   };
+
   const imageLoads = assets.map((src) => new Promise((resolve) => {
     const image = new Image();
     let settled = false;
+
     const finish = () => {
       if (settled) return;
       settled = true;
@@ -814,22 +954,27 @@ async function loadScreenAssets() {
       updateProgress((completed / assets.length) * 88);
       resolve();
     };
+
     image.onload = finish;
     image.onerror = finish;
     image.src = src;
     if (image.complete) finish();
   }));
+
   let softProgress = 0;
   const progressTimer = window.setInterval(() => {
     softProgress = Math.min(84, softProgress + 2 + Math.random() * 4);
     updateProgress(Math.max((completed / assets.length) * 88, softProgress));
   }, 80);
+
   const minDuration = new Promise((resolve) => window.setTimeout(resolve, 1050));
   await Promise.all([Promise.all(imageLoads), minDuration]);
   window.clearInterval(progressTimer);
   updateProgress(100);
+
   await new Promise((resolve) => window.setTimeout(resolve, 220));
   $('loading-screen').classList.add('loading-complete');
+
   window.setTimeout(() => {
     $('loading-screen').hidden = true;
     $('app-shell').hidden = false;
@@ -846,5 +991,4 @@ showLeaderboardLoading();
 void setupTonConnect();
 if (hasSecureSession()) void refreshBootstrap({ silent: true });
 void loadScreenAssets();
-  
-  
+    
